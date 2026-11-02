@@ -13,9 +13,6 @@ import org.slf4j.MDC
 import org.springframework.stereotype.Service
 import java.time.Clock
 
-/** Resumo de um ciclo do job de vencimento. */
-data class ExpirationSummary(val confirmed: Int, val failed: Int, val waiting: Int, val alerts: Int)
-
 /**
  * Job de vencimento (TD_paymentFailed F2/F3): cancela a order vencida no MP e finaliza o pagamento.
  * Cada pagamento vencido é uma etapa `EXPIRE_PAYMENT` da ordem: `START` antes de chamar o Mercado Pago e

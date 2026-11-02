@@ -5,18 +5,6 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
 
-enum class BudgetItemType { REPAIR, MATERIAL }
-
-data class MaterialRequest(val materialId: UUID, val quantity: BigDecimal)
-
-data class BudgetItem(
-    val type: BudgetItemType,
-    val itemRef: UUID,
-    val quantity: BigDecimal,
-    val unitPrice: BigDecimal,
-    val totalPrice: BigDecimal,
-)
-
 data class Budget(
     val items: List<BudgetItem>,
     val laborTotal: BigDecimal,

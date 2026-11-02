@@ -11,17 +11,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Clock
 
-enum class WebhookResult {
-    /** Pagamento aprovado nesta chamada. */
-    CONFIRMED,
-
-    /** Notificação sem efeito (repetida, não paga ou desconhecida). */
-    IGNORED,
-
-    /** Falha transitória: o Mercado Pago deve reenviar. */
-    RETRY,
-}
-
 /**
  * Confirma o pagamento a partir da notificação do Mercado Pago (TD_finishedOS 17). A etapa `CONFIRM_PAYMENT`
  * é aberta pelo webhook; aqui entram o `orderId` (assim que o pagamento é carregado), o contexto e o desfecho.

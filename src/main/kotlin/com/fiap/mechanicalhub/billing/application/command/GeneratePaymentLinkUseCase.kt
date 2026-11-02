@@ -5,15 +5,10 @@ import com.fiap.mechanicalhub.billing.application.payment.OutboxMessage
 import com.fiap.mechanicalhub.billing.application.payment.PaymentGateway
 import com.fiap.mechanicalhub.billing.application.payment.TransactionRunner
 import com.fiap.mechanicalhub.billing.domain.BusinessRuleException
-import com.fiap.mechanicalhub.billing.domain.payment.PaymentDeadlines
 import com.fiap.mechanicalhub.billing.logging.FlowLog
 import com.fiap.mechanicalhub.billing.logging.LogLevel
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
-import java.time.Clock
-import java.time.Duration
 import java.util.UUID
 
 /**
@@ -110,13 +105,4 @@ class GeneratePaymentLinkUseCase(
     private companion object {
         val log = LoggerFactory.getLogger(GeneratePaymentLinkUseCase::class.java)
     }
-}
-
-/** Calcula os prazos do pagamento; o prazo de vencimento é configurável (padrão 24h, reduzido só em demonstração). */
-@Component
-class PaymentDeadlineFactory(
-    private val clock: Clock,
-    @Value("\${billing.payment.due-delay:PT24H}") private val dueDelay: Duration = PaymentDeadlines.DUE_DELAY,
-) {
-    fun create(): PaymentDeadlines = PaymentDeadlines.from(clock.instant(), dueDelay)
 }

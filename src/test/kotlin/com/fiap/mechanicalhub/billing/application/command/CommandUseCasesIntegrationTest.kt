@@ -1,52 +1,20 @@
 package com.fiap.mechanicalhub.billing.application.command
 
 import com.fiap.mechanicalhub.billing.TestcontainersConfiguration
-import com.fiap.mechanicalhub.billing.application.payment.CreateOrderCommand
-import com.fiap.mechanicalhub.billing.application.payment.CreatedOrder
-import com.fiap.mechanicalhub.billing.application.payment.PaymentGateway
 import com.fiap.mechanicalhub.billing.application.payment.TransientGatewayException
 import com.fiap.mechanicalhub.billing.domain.BusinessRuleException
 import com.fiap.mechanicalhub.billing.domain.budget.MaterialRequest
-import com.fiap.mechanicalhub.billing.domain.payment.CancelOutcome
-import com.fiap.mechanicalhub.billing.domain.payment.OrderLookup
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
-import org.springframework.context.annotation.Primary
 import org.springframework.jdbc.core.JdbcTemplate
 import java.math.BigDecimal
 import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
-
-class RecordingGateway : PaymentGateway {
-    val created = mutableListOf<CreateOrderCommand>()
-
-    @Volatile
-    var failure: RuntimeException? = null
-
-    override fun createOrder(command: CreateOrderCommand): CreatedOrder {
-        failure?.let { throw it }
-        created += command
-        return CreatedOrder("ORD-${command.idempotencyKey}", "https://checkout/${command.orderId}")
-    }
-
-    override fun getOrder(mpOrderId: String): OrderLookup = error("not used")
-
-    override fun cancelOrder(mpOrderId: String, idempotencyKey: String): CancelOutcome = error("not used")
-}
-
-@TestConfiguration(proxyBeanMethods = false)
-class RecordingGatewayConfig {
-    @Bean
-    @Primary
-    fun recordingGateway() = RecordingGateway()
-}
 
 @Import(TestcontainersConfiguration::class, RecordingGatewayConfig::class)
 @SpringBootTest
