@@ -2,7 +2,7 @@ package com.fiap.mechanicalhub.billing.application.command
 
 import com.fiap.mechanicalhub.billing.application.payment.EventOutbox
 import com.fiap.mechanicalhub.billing.application.payment.OutboxMessage
-import org.slf4j.LoggerFactory
+import com.fiap.mechanicalhub.billing.logging.FlowLog
 import org.springframework.stereotype.Component
 
 /** Deduplicação por `idempotencyKey`: duplicata regrava no outbox a resposta da primeira execução. */
@@ -17,7 +17,9 @@ class InboxResponder(
     fun replay(key: String): Boolean {
         val entry = inbox.find(key) ?: return false
         entry.response?.let { outbox.publish(it) }
-        log.info("Comando duplicado key={} replay={}", key, entry.response != null)
+        // Não é erro (failure_handling §1): a etapa termina em END com o desfecho da deduplicação.
+        FlowLog.detail("outcome" to "DUPLICATE", "responseReplayed" to (entry.response != null))
+        FlowLog.endMessage("Comando duplicado, resposta original regravada no outbox")
         return true
     }
 
@@ -31,9 +33,5 @@ class InboxResponder(
     fun respond(key: String, response: OutboxMessage) {
         outbox.publish(response)
         inbox.saveResponse(key, response)
-    }
-
-    private companion object {
-        val log = LoggerFactory.getLogger(InboxResponder::class.java)
     }
 }

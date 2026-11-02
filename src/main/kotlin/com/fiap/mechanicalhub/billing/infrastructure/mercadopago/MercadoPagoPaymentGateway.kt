@@ -7,6 +7,8 @@ import com.fiap.mechanicalhub.billing.application.payment.PermanentGatewayExcept
 import com.fiap.mechanicalhub.billing.application.payment.TransientGatewayException
 import com.fiap.mechanicalhub.billing.domain.payment.CancelOutcome
 import com.fiap.mechanicalhub.billing.domain.payment.OrderLookup
+import com.fiap.mechanicalhub.billing.logging.FlowLog
+import com.fiap.mechanicalhub.billing.logging.LogLevel
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Metrics
 import io.micrometer.core.instrument.Timer
@@ -40,11 +42,7 @@ class MercadoPagoPaymentGateway(
             }
 
             HttpClass.PERMANENT -> {
-                log.error(
-                    "MP rejeitou a criacao ({}): {}",
-                    response.statusCode(),
-                    response.body().take(MAX_LOGGED_BODY),
-                )
+                // Sem o corpo da resposta (logging-standard §6): o FAIL da etapa leva o status HTTP na exMsg.
                 throw PermanentGatewayException("MP rejeitou a criacao (${response.statusCode()})")
             }
         }
@@ -95,9 +93,16 @@ class MercadoPagoPaymentGateway(
             val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
             status = response.statusCode().toString()
             if (response.statusCode() == STATUS_UNAUTHORIZED || response.statusCode() == STATUS_NOT_FOUND) {
+                // O alerta em log sai no FAIL da etapa (webhook, job ou comando); aqui fica a métrica.
                 registry.counter("billing_alerts_total", "type", "MP_$status").increment()
-                log.error("ALERTA: Mercado Pago respondeu {} em {}", status, operation)
             }
+            FlowLog.note(
+                log,
+                LogLevel.DEBUG,
+                "Resposta do Mercado Pago",
+                "operation" to operation,
+                "httpStatus" to status,
+            )
             return response
         } catch (exception: IOException) {
             throw TransientGatewayException("Falha de comunicacao com o Mercado Pago", exception)
@@ -129,7 +134,6 @@ class MercadoPagoPaymentGateway(
         val READ_TIMEOUT: Duration = Duration.ofSeconds(5)
         val HTTP_SUCCESS_RANGE = 200..299
         val log = LoggerFactory.getLogger(MercadoPagoPaymentGateway::class.java)
-        const val MAX_LOGGED_BODY = 1000
         const val STATUS_UNAUTHORIZED = 401
         const val STATUS_NOT_FOUND = 404
         const val STATUS_CONFLICT = 409

@@ -3,6 +3,8 @@ package com.fiap.mechanicalhub.billing.infrastructure.web
 import com.fiap.mechanicalhub.billing.application.payment.ConfirmPaymentUseCase
 import com.fiap.mechanicalhub.billing.application.payment.WebhookResult
 import com.fiap.mechanicalhub.billing.infrastructure.mercadopago.WebhookSignatureValidator
+import com.fiap.mechanicalhub.billing.logging.FlowLog
+import com.fiap.mechanicalhub.billing.logging.FlowStep
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Metrics
 import org.slf4j.LoggerFactory
@@ -39,6 +41,8 @@ class PaymentWebhookController(
         return response
     }
 
+    /** Etapa `CONFIRM_PAYMENT`: o `orderId` só é conhecido quando o pagamento é carregado do banco (§8). */
+    @Suppress("TooGenericExceptionCaught")
     private fun handle(
         body: String?,
         signature: String?,
@@ -46,21 +50,53 @@ class PaymentWebhookController(
         queryDataId: String?,
     ): ResponseEntity<Void> {
         val dataId = extractDataId(body) ?: queryDataId?.takeIf { it.isNotBlank() }
+        dataId?.let { MDC.put(MP_ORDER_ID, it) }
+        val step = FlowLog.begin(log, null, STATUS)
+        return try {
+            step.start("Notificação de pagamento recebida", "mpOrderId" to dataId)
+            val response = confirm(step, dataId, signature, requestId)
+            val httpStatus = response.statusCode.value()
+            if (FlowLog.current() === step) step.end("Notificação processada", "httpStatus" to httpStatus)
+            response
+        } catch (exception: DataAccessException) {
+            step.warnFail(RETRY_MESSAGE, exception, "httpStatus" to SERVER_ERROR)
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        } catch (exception: Exception) {
+            step.errorFail("Falha inesperada ao processar a notificação", exception, "httpStatus" to SERVER_ERROR)
+            throw exception
+        } finally {
+            MDC.remove(MP_ORDER_ID)
+            MDC.remove(FlowLog.ORDER_ID_KEY)
+        }
+    }
+
+    private fun confirm(
+        step: FlowStep,
+        dataId: String?,
+        signature: String?,
+        requestId: String?,
+    ): ResponseEntity<Void> {
         if (!signatureValidator.isValid(signature, requestId, dataId)) {
+            step.warnFail("Assinatura do webhook inválida, notificação recusada", null, "httpStatus" to UNAUTHORIZED)
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
         }
-        if (dataId == null) return ResponseEntity.ok().build()
-        MDC.put("mpOrderId", dataId)
-        return try {
-            when (confirmPayment.execute(dataId)) {
-                WebhookResult.CONFIRMED, WebhookResult.IGNORED -> ResponseEntity.ok().build()
-                WebhookResult.RETRY -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        if (dataId == null) {
+            step.endMessage("Notificação sem id da order, ignorada")
+            return ResponseEntity.ok().build()
+        }
+        return when (confirmPayment.execute(dataId)) {
+            WebhookResult.CONFIRMED, WebhookResult.IGNORED -> {
+                ResponseEntity.ok().build()
             }
-        } catch (exception: DataAccessException) {
-            log.error("Falha ao processar webhook da order {}", dataId, exception)
-            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
-        } finally {
-            MDC.remove("mpOrderId")
+
+            WebhookResult.RETRY -> {
+                step.warnFail(
+                    "Falha transitória ao consultar a order no Mercado Pago; o Mercado Pago vai reenviar",
+                    null,
+                    "httpStatus" to SERVER_ERROR,
+                )
+                ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+            }
         }
     }
 
@@ -74,6 +110,11 @@ class PaymentWebhookController(
             ?.takeIf { it.isNotBlank() }
 
     private companion object {
+        const val STATUS = "CONFIRM_PAYMENT"
+        const val MP_ORDER_ID = "mpOrderId"
+        const val UNAUTHORIZED = 401
+        const val SERVER_ERROR = 500
+        const val RETRY_MESSAGE = "Falha transitória ao processar a notificação; o Mercado Pago vai reenviar"
         val log = LoggerFactory.getLogger(PaymentWebhookController::class.java)
     }
 }
