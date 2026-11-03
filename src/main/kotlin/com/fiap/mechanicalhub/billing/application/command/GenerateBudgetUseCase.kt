@@ -6,7 +6,7 @@ import com.fiap.mechanicalhub.billing.domain.budget.Budget
 import com.fiap.mechanicalhub.billing.logging.FlowLog
 import org.springframework.stereotype.Service
 
-/** TD_finishedOS 9: calcula e grava o orçamento com o preço do momento e responde `budgetGenerated`. */
+/** td_finished_os 9: calcula e grava o orçamento com o preço do momento e responde `budgetGenerated`. */
 @Service
 class GenerateBudgetUseCase(
     private val prices: PriceCatalog,

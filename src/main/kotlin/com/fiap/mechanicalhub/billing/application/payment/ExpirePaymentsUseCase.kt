@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service
 import java.time.Clock
 
 /**
- * Job de vencimento (TD_paymentFailed F2/F3): cancela a order vencida no MP e finaliza o pagamento.
+ * Job de vencimento (td_payment_failed F2/F3): cancela a order vencida no MP e finaliza o pagamento.
  * Cada pagamento vencido é uma etapa `EXPIRE_PAYMENT` da ordem: `START` antes de chamar o Mercado Pago e
  * `END` ou `FAIL` com a decisão tomada (falha, pago no último instante, aguardar, alerta).
  */

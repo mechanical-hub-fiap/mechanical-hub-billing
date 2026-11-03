@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service
 import java.util.UUID
 
 /**
- * TD_finishedOS 14. A chamada ao Mercado Pago fica fora de qualquer transação: antes dela uma
+ * td_finished_os 14. A chamada ao Mercado Pago fica fora de qualquer transação: antes dela uma
  * transação curta trata duplicata e reaproveita o pagamento PENDING; depois dela, outra grava tudo.
  */
 @Service

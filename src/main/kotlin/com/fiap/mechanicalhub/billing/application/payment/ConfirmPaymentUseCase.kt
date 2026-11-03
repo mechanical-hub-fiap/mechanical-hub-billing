@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service
 import java.time.Clock
 
 /**
- * Confirma o pagamento a partir da notificação do Mercado Pago (TD_finishedOS 17). A etapa `CONFIRM_PAYMENT`
+ * Confirma o pagamento a partir da notificação do Mercado Pago (td_finished_os 17). A etapa `CONFIRM_PAYMENT`
  * é aberta pelo webhook; aqui entram o `orderId` (assim que o pagamento é carregado), o contexto e o desfecho.
  */
 @Service
