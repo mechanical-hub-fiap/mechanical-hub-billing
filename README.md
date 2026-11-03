@@ -42,7 +42,7 @@ Testes e cobertura (Docker ativo, por causa do Testcontainers): `./mvnw -q verif
 
 Prazo reduzido para demonstração: `BILLING_PAYMENT_DUE_DELAY=PT30M` (ISO-8601; padrão `PT24H`). Altera `due_at`/`expires_at` dos novos pagamentos; o job continua a cada 5 min. Não use em produção.
 
-A collection Postman está em `postman/mechanical-hub-billing.postman_collection.json` (webhook, actuator e corpos dos comandos).
+A collection Postman está em `docs/api/mechanical-hub-billing.postman_collection.json` (webhook, actuator e corpos dos comandos).
 
 ## Como testar no sandbox do Mercado Pago
 
