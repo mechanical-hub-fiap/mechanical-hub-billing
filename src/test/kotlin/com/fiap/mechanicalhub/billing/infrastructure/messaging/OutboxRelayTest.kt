@@ -44,7 +44,7 @@ class OutboxRelayTest {
         every { resultSet.getString("payload") } returns "{}"
         val mapper = slot<RowMapper<Any>>()
         every { spec.query(capture(mapper)) } returns rowsSpec
-        every { rowsSpec.list() } answers { List(count) { mapper.captured.mapRow(resultSet, it)!! } }
+        every { rowsSpec.list() } answers { List(count) { requireNotNull(mapper.captured.mapRow(resultSet, it)) } }
     }
 
     @Test

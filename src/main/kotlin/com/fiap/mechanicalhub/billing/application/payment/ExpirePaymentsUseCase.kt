@@ -81,7 +81,8 @@ class ExpirePaymentsUseCase(
                 if (decided.transientFailure) {
                     step.warnFail(
                         "Falha transitória no Mercado Pago, nova tentativa no próximo ciclo",
-                        null, "outcome" to "WAIT",
+                        null,
+                        "outcome" to "WAIT",
                     )
                 } else {
                     step.end(
@@ -95,7 +96,8 @@ class ExpirePaymentsUseCase(
             ExpirationDecision.Alert -> {
                 step.errorFail(
                     "ALERTA: erro permanente ao cancelar ou consultar a order no Mercado Pago",
-                    null, "alert" to "MP_PERMANENT_ERROR",
+                    null,
+                    "alert" to "MP_PERMANENT_ERROR",
                 )
                 ExpireResult.ALERT
             }
