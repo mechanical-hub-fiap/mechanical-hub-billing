@@ -2,6 +2,7 @@ package com.fiap.mechanicalhub.billing.infrastructure.persistence
 
 import com.fiap.mechanicalhub.billing.application.payment.EventOutbox
 import com.fiap.mechanicalhub.billing.application.payment.OutboxMessage
+import com.fiap.mechanicalhub.billing.logging.FlowLog
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Metrics
 import org.springframework.jdbc.core.simple.JdbcClient
@@ -41,6 +42,7 @@ class JdbcEventOutbox(
             .param("eventType", message.type)
             .param("payload", mapper.writeValueAsString(envelope))
             .update()
+        FlowLog.detail("outboxEvent" to message.type)
         if (message.type == "paymentFailed") {
             registry
                 .counter("billing_payment_failed_total", "reason", message.payload["reason"]?.toString() ?: "UNKNOWN")

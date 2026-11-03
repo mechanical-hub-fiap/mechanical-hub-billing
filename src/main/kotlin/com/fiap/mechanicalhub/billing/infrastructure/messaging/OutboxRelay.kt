@@ -2,6 +2,10 @@ package com.fiap.mechanicalhub.billing.infrastructure.messaging
 
 import com.fiap.mechanicalhub.billing.application.payment.OutboxMessageSender
 import com.fiap.mechanicalhub.billing.application.payment.TransactionRunner
+import com.fiap.mechanicalhub.billing.logging.FlowFields
+import com.fiap.mechanicalhub.billing.logging.FlowLog
+import com.fiap.mechanicalhub.billing.logging.LogLevel
+import com.fiap.mechanicalhub.billing.logging.Stage
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -31,7 +35,7 @@ class OutboxRelay(
         try {
             relay()
         } catch (e: Exception) {
-            log.error("Falha no ciclo do relay do outbox", e)
+            FlowLog.write(log, LogLevel.ERROR, FlowFields(null, null, "Falha no ciclo do relay do outbox", error = e))
         }
     }
 
@@ -49,7 +53,7 @@ class OutboxRelay(
                 jdbc
                     .sql(
                         """
-                        SELECT sequence, event_id, aggregate_id, payload::text AS payload
+                        SELECT sequence, event_id, aggregate_id, event_type, payload::text AS payload
                         FROM outbox_events
                         WHERE status = 'PENDING'
                         ORDER BY sequence
@@ -61,6 +65,7 @@ class OutboxRelay(
                             rs.getLong("sequence"),
                             rs.getObject("event_id", UUID::class.java),
                             rs.getObject("aggregate_id", UUID::class.java),
+                            rs.getString("event_type"),
                             rs.getString("payload"),
                         )
                     }.list()
@@ -69,7 +74,7 @@ class OutboxRelay(
                 try {
                     sendWithMdc(event)
                 } catch (e: Exception) {
-                    log.error("Falha ao enviar outbox sequence={} eventId={}", event.sequence, event.eventId, e)
+                    logFailure(event, e)
                     jdbc
                         .sql(MARK_FAILED_SQL)
                         .param("error", e.message ?: e.javaClass.name)
@@ -86,20 +91,69 @@ class OutboxRelay(
             sent
         }
 
+    /** O MDC é repopulado a partir da linha do outbox (logging-standard §8) e vale também para o log do envio. */
     private fun sendWithMdc(event: Pending) {
-        MDC.putCloseable("eventId", event.eventId.toString()).use {
-            MDC.putCloseable("orderId", event.aggregateId.toString()).use {
-                sender.send(event.aggregateId, event.eventId, event.payload)
-            }
+        withMdc(event) {
+            sender.send(event.aggregateId, event.eventId, event.payload)
+            FlowLog.write(
+                log,
+                LogLevel.INFO,
+                FlowFields(
+                    orderId = event.aggregateId,
+                    status = statusOf(event.eventType),
+                    msg = "Evento ${event.eventType} publicado na fila do orquestrador",
+                    context = listOf("eventType" to event.eventType),
+                ),
+            )
         }
     }
 
-    private data class Pending(val sequence: Long, val eventId: UUID, val aggregateId: UUID, val payload: String)
+    /** Falha no envio interrompe o lote; o mesmo evento é reenviado no próximo ciclo (failure_handling §4). */
+    private fun logFailure(event: Pending, error: Exception) {
+        withMdc(event) {
+            FlowLog.write(
+                log,
+                LogLevel.WARN,
+                FlowFields(
+                    orderId = event.aggregateId,
+                    status = statusOf(event.eventType),
+                    msg = "Falha ao publicar evento ${event.eventType}, nova tentativa no próximo ciclo",
+                    stage = Stage.FAIL,
+                    context = listOf("eventType" to event.eventType),
+                    error = error,
+                ),
+            )
+        }
+    }
+
+    private fun withMdc(event: Pending, block: () -> Unit) {
+        MDC.putCloseable("eventId", event.eventId.toString()).use {
+            MDC.putCloseable(FlowLog.ORDER_ID_KEY, event.aggregateId.toString()).use { block() }
+        }
+    }
+
+    /** Etapa da saga a que o evento pertence, para o filtro por `status` mostrar a publicação. */
+    private fun statusOf(eventType: String): String = EVENT_STATUS[eventType] ?: FlowLog.statusOf(eventType)
+
+    private data class Pending(
+        val sequence: Long,
+        val eventId: UUID,
+        val aggregateId: UUID,
+        val eventType: String,
+        val payload: String,
+    )
 
     private companion object {
         const val LOCK_KEY = 7_000_001L
         const val BATCH_SIZE = 100
         const val MARK_FAILED_SQL =
             "UPDATE outbox_events SET attempts = attempts + 1, last_error = :error WHERE sequence = :seq"
+        val EVENT_STATUS =
+            mapOf(
+                "budgetGenerated" to "GENERATE_BUDGET",
+                "paymentLinkGenerated" to "GENERATE_PAYMENT_LINK",
+                "paymentConfirmed" to "CONFIRM_PAYMENT",
+                "paymentFailed" to "EXPIRE_PAYMENT",
+            )
     }
 }

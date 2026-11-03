@@ -3,15 +3,21 @@ package com.fiap.mechanicalhub.billing.application.payment
 import com.fiap.mechanicalhub.billing.domain.payment.CancelOutcome
 import com.fiap.mechanicalhub.billing.domain.payment.ExpirationDecision
 import com.fiap.mechanicalhub.billing.domain.payment.ExpirationRules
+import com.fiap.mechanicalhub.billing.domain.payment.OrderLookup
+import com.fiap.mechanicalhub.billing.domain.payment.PaymentStatusEnum
 import com.fiap.mechanicalhub.billing.domain.payment.PaymentTransition
+import com.fiap.mechanicalhub.billing.logging.FlowLog
+import com.fiap.mechanicalhub.billing.logging.FlowStep
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.stereotype.Service
 import java.time.Clock
 
-/** Resumo de um ciclo do job de vencimento. */
-data class ExpirationSummary(val confirmed: Int, val failed: Int, val waiting: Int, val alerts: Int)
-
-/** Job de vencimento (TD_paymentFailed F2/F3): cancela a order vencida no MP e finaliza o pagamento. */
+/**
+ * Job de vencimento (TD_paymentFailed F2/F3): cancela a order vencida no MP e finaliza o pagamento.
+ * Cada pagamento vencido é uma etapa `EXPIRE_PAYMENT` da ordem: `START` antes de chamar o Mercado Pago e
+ * `END` ou `FAIL` com a decisão tomada (falha, pago no último instante, aguardar, alerta).
+ */
 @Suppress("TooGenericExceptionCaught")
 @Service
 class ExpirePaymentsUseCase(
@@ -22,45 +28,118 @@ class ExpirePaymentsUseCase(
     private val clock: Clock,
 ) {
     fun execute(): ExpirationSummary {
-        var confirmed = 0
-        var failed = 0
-        var waiting = 0
-        var alerts = 0
-        for (due in store.findDue(clock.instant(), BATCH_SIZE)) {
-            val decision =
+        val results =
+            store.findDue(clock.instant(), BATCH_SIZE).map { due ->
+                MDC.put(FlowLog.ORDER_ID_KEY, due.orderId.toString())
                 try {
-                    decide(due)
-                } catch (e: Exception) {
-                    log.error("Falha ao processar vencimento da order {}", due.mpOrderId, e)
-                    ExpirationDecision.Wait
-                }
-            when (decision) {
-                is ExpirationDecision.Fail -> {
-                    if (finalize(due, decision)) failed++
-                }
-
-                is ExpirationDecision.Confirm -> {
-                    if (finalize(due, decision)) confirmed++
-                }
-
-                ExpirationDecision.Wait -> {
-                    waiting++
-                }
-
-                ExpirationDecision.Alert -> {
-                    log.error("ALERTA: erro permanente ao cancelar/consultar a order {}", due.mpOrderId)
-                    alerts++
+                    expire(due)
+                } finally {
+                    MDC.remove(FlowLog.ORDER_ID_KEY)
                 }
             }
+        return ExpirationSummary(
+            confirmed = results.count { it == ExpireResult.CONFIRMED },
+            failed = results.count { it == ExpireResult.FAILED },
+            waiting = results.count { it == ExpireResult.WAITING },
+            alerts = results.count { it == ExpireResult.ALERT },
+        )
+    }
+
+    private fun expire(due: PaymentRecord): ExpireResult {
+        val step = FlowLog.begin(log, due.orderId, STATUS, clock = clock)
+        step.start(
+            "Prazo de pagamento vencido, cancelando a order no Mercado Pago",
+            "paymentId" to due.paymentId,
+            "mpOrderId" to due.mpOrderId,
+        )
+        val decided =
+            try {
+                decide(due)
+            } catch (e: Exception) {
+                step.errorFail("Falha ao processar o vencimento, nova tentativa no próximo ciclo", e)
+                return ExpireResult.WAITING
+            }
+        return try {
+            conclude(step, due, decided)
+        } catch (e: Exception) {
+            step.errorFail("Falha ao finalizar o vencimento do pagamento", e)
+            throw e
         }
-        return ExpirationSummary(confirmed, failed, waiting, alerts)
+    }
+
+    private fun conclude(step: FlowStep, due: PaymentRecord, decided: Decided): ExpireResult =
+        when (val decision = decided.decision) {
+            is ExpirationDecision.Fail -> {
+                finish(step, due, decision, ExpireResult.FAILED)
+            }
+
+            is ExpirationDecision.Confirm -> {
+                finish(step, due, decision, ExpireResult.CONFIRMED)
+            }
+
+            ExpirationDecision.Wait -> {
+                if (decided.transientFailure) {
+                    step.warnFail(
+                        "Falha transitória no Mercado Pago, nova tentativa no próximo ciclo",
+                        null,
+                        "outcome" to "WAIT",
+                    )
+                } else {
+                    step.end(
+                        "Order sem decisão final no Mercado Pago, nova verificação no próximo ciclo",
+                        "outcome" to "WAIT",
+                    )
+                }
+                ExpireResult.WAITING
+            }
+
+            ExpirationDecision.Alert -> {
+                step.errorFail(
+                    "ALERTA: erro permanente ao cancelar ou consultar a order no Mercado Pago",
+                    null,
+                    "alert" to "MP_PERMANENT_ERROR",
+                )
+                ExpireResult.ALERT
+            }
+        }
+
+    /** Grava a decisão; `false` de [finalize] significa que o webhook ou outro ciclo já decidiu. */
+    private fun finish(
+        step: FlowStep,
+        due: PaymentRecord,
+        decision: ExpirationDecision,
+        result: ExpireResult,
+    ): ExpireResult {
+        if (!finalize(due, decision)) {
+            step.end("Pagamento já finalizado por outro fluxo, nada a fazer", "outcome" to "ALREADY_FINALIZED")
+            return ExpireResult.NONE
+        }
+        if (decision is ExpirationDecision.Fail) {
+            step.end(
+                "Pagamento não confirmado no prazo, evento paymentFailed gravado no outbox",
+                "reason" to decision.reason,
+                "paymentStatus" to PaymentStatusEnum.CANCELED,
+            )
+        } else {
+            step.end(
+                "Pagamento encontrado como pago no Mercado Pago, evento paymentConfirmed gravado no outbox",
+                "paymentStatus" to PaymentStatusEnum.APPROVED,
+            )
+        }
+        return result
     }
 
     /** Chamadas ao Mercado Pago ficam fora da transação. */
-    private fun decide(due: PaymentRecord): ExpirationDecision {
+    private fun decide(due: PaymentRecord): Decided {
         val cancel = gateway.cancelOrder(due.mpOrderId, "${due.transactionId}:CANCEL_MP_ORDER")
         val lookup = if (cancel == CancelOutcome.Conflict) gateway.getOrder(due.mpOrderId) else null
-        return ExpirationRules.decide(cancel, lookup)
+        FlowLog.detail(
+            "mpCancel" to cancel.javaClass.simpleName,
+            "mpLookup" to lookup?.javaClass?.simpleName,
+            "mpStatus" to (lookup as? OrderLookup.Found)?.status,
+        )
+        val transient = cancel == CancelOutcome.Transient || lookup == OrderLookup.Transient
+        return Decided(ExpirationRules.decide(cancel, lookup), transient)
     }
 
     private fun finalize(due: PaymentRecord, decision: ExpirationDecision): Boolean =
@@ -103,7 +182,12 @@ class ExpirePaymentsUseCase(
         }
     }
 
+    private data class Decided(val decision: ExpirationDecision, val transientFailure: Boolean)
+
+    private enum class ExpireResult { CONFIRMED, FAILED, WAITING, ALERT, NONE }
+
     private companion object {
+        const val STATUS = "EXPIRE_PAYMENT"
         const val BATCH_SIZE = 100
         const val PAYMENT_CONFIRMED = "paymentConfirmed"
         const val PAYMENT_FAILED = "paymentFailed"

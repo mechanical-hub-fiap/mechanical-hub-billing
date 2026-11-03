@@ -11,15 +11,6 @@ import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 import java.util.UUID
 
-/** Funcionario autenticado pelo API Gateway (Lambda `authorize`). */
-data class GatewayPrincipal(
-    val id: UUID,
-    val name: String?,
-    val role: String,
-) {
-    override fun toString(): String = id.toString()
-}
-
 /**
  * Converte os headers repassados pelo API Gateway em autenticacao do Spring
  * Security (mesma regra do monolito). Sem headers validos a requisicao segue

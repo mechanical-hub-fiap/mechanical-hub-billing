@@ -1,20 +1,13 @@
 package com.fiap.mechanicalhub.billing.infrastructure.web
 
 import com.fiap.mechanicalhub.billing.TestcontainersConfiguration
-import com.fiap.mechanicalhub.billing.application.payment.CreateOrderCommand
-import com.fiap.mechanicalhub.billing.application.payment.CreatedOrder
-import com.fiap.mechanicalhub.billing.application.payment.PaymentGateway
-import com.fiap.mechanicalhub.billing.domain.payment.CancelOutcome
 import com.fiap.mechanicalhub.billing.domain.payment.OrderLookup
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
@@ -24,24 +17,6 @@ import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.test.assertEquals
-
-class FakeGateway : PaymentGateway {
-    @Volatile
-    var lookup: OrderLookup = OrderLookup.Found("processed", "accredited")
-
-    override fun createOrder(command: CreateOrderCommand): CreatedOrder = error("not used")
-
-    override fun getOrder(mpOrderId: String): OrderLookup = lookup
-
-    override fun cancelOrder(mpOrderId: String, idempotencyKey: String): CancelOutcome = error("not used")
-}
-
-@TestConfiguration(proxyBeanMethods = false)
-class FakeGatewayConfig {
-    @Bean
-    @Primary
-    fun fakeGateway() = FakeGateway()
-}
 
 @Import(TestcontainersConfiguration::class, FakeGatewayConfig::class)
 @SpringBootTest(properties = ["mercado-pago.webhook-secret=test-secret"])

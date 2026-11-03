@@ -5,12 +5,10 @@ import com.fiap.mechanicalhub.billing.application.payment.OutboxMessage
 import com.fiap.mechanicalhub.billing.application.payment.PaymentGateway
 import com.fiap.mechanicalhub.billing.application.payment.TransactionRunner
 import com.fiap.mechanicalhub.billing.domain.BusinessRuleException
-import com.fiap.mechanicalhub.billing.domain.payment.PaymentDeadlines
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.stereotype.Component
+import com.fiap.mechanicalhub.billing.logging.FlowLog
+import com.fiap.mechanicalhub.billing.logging.LogLevel
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
-import java.time.Clock
-import java.time.Duration
 import java.util.UUID
 
 /**
@@ -31,6 +29,7 @@ class GeneratePaymentLinkUseCase(
         if (handled) return
 
         val deadlines = deadlineFactory.create()
+        FlowLog.note(log, LogLevel.INFO, "Criando order no Mercado Pago", "budgetId" to command.budgetId)
         val created =
             gateway.createOrder(
                 CreateOrderCommand(
@@ -43,9 +42,10 @@ class GeneratePaymentLinkUseCase(
         transactions.run {
             responder.limitLockWait()
             if (!responder.claimOrReplay(command.idempotencyKey)) return@run
+            val paymentId = UUID.randomUUID()
             links.insert(
                 NewPayment(
-                    paymentId = UUID.randomUUID(),
+                    paymentId = paymentId,
                     orderId = command.orderId,
                     transactionId = command.transactionId,
                     budgetId = command.budgetId,
@@ -57,6 +57,15 @@ class GeneratePaymentLinkUseCase(
                 ),
             )
             respond(command, created.checkoutUrl, deadlines.dueAt.toString())
+            FlowLog.detail(
+                "budgetId" to command.budgetId,
+                "orderCost" to command.orderCost,
+                "paymentId" to paymentId,
+                "mpOrderId" to created.mpOrderId,
+                "paymentStatus" to "PENDING",
+                "dueAt" to deadlines.dueAt,
+            )
+            FlowLog.endMessage("Order criada no Mercado Pago, evento paymentLinkGenerated gravado no outbox")
         }
     }
 
@@ -70,6 +79,8 @@ class GeneratePaymentLinkUseCase(
         val pending = links.findPendingByTransaction(command.transactionId) ?: return false
         if (responder.claimOrReplay(command.idempotencyKey)) {
             respond(command, pending.checkoutUrl, pending.dueAt.toString())
+            FlowLog.detail("outcome" to "REUSED_PENDING_PAYMENT", "mpOrderId" to pending.mpOrderId)
+            FlowLog.endMessage("Pagamento PENDING reaproveitado, evento paymentLinkGenerated gravado no outbox")
         }
         return true
     }
@@ -90,13 +101,8 @@ class GeneratePaymentLinkUseCase(
                     ),
             ),
         )
-}
 
-/** Calcula os prazos do pagamento; o prazo de vencimento é configurável (padrão 24h, reduzido só em demonstração). */
-@Component
-class PaymentDeadlineFactory(
-    private val clock: Clock,
-    @Value("\${billing.payment.due-delay:PT24H}") private val dueDelay: Duration = PaymentDeadlines.DUE_DELAY,
-) {
-    fun create(): PaymentDeadlines = PaymentDeadlines.from(clock.instant(), dueDelay)
+    private companion object {
+        val log = LoggerFactory.getLogger(GeneratePaymentLinkUseCase::class.java)
+    }
 }

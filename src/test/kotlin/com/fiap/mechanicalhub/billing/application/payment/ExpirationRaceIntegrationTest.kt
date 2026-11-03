@@ -7,34 +7,12 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
-import org.springframework.context.annotation.Primary
 import org.springframework.jdbc.core.JdbcTemplate
 import java.util.UUID
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
-
-class ScriptedGateway : PaymentGateway {
-    @Volatile var cancel: CancelOutcome = CancelOutcome.Canceled
-
-    @Volatile var lookup: OrderLookup = OrderLookup.Found("processed", "accredited")
-
-    override fun createOrder(command: CreateOrderCommand): CreatedOrder = error("not used")
-
-    override fun getOrder(mpOrderId: String): OrderLookup = lookup
-
-    override fun cancelOrder(mpOrderId: String, idempotencyKey: String): CancelOutcome = cancel
-}
-
-@TestConfiguration(proxyBeanMethods = false)
-class ScriptedGatewayConfig {
-    @Bean
-    @Primary
-    fun scriptedGateway() = ScriptedGateway()
-}
 
 @Import(TestcontainersConfiguration::class, ScriptedGatewayConfig::class)
 @SpringBootTest(properties = ["mercado-pago.webhook-secret=test-secret"])
