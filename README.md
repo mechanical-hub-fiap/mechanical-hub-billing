@@ -76,7 +76,7 @@ PostgreSQL, porque orçamento, itens e pagamentos são relacionados e exigem tra
 
 ![Relatório JaCoCo](docs/assets/coverage-report.png)
 
-Última execução local do JaCoCo (2026-11-03): **95,9% de linhas** e 87,4% de branches. Meta: ≥ 80% (o build falha abaixo disso). Relatório em `target/site/jacoco/index.html` e no artefato `jacoco-report` do CI.
+Relatório JaCoCo da última execução completa de `verify` (2026-11-02): **97,0% de linhas** e 87,4% de branches. Meta: ≥ 80% (o build falha abaixo disso). Relatório em `target/site/jacoco/index.html` e no artefato `jacoco-report` do CI.
 
 ## CI/CD
 
